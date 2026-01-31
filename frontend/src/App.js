@@ -7,6 +7,7 @@ function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [events, setEvents] = useState([]);
   const [isTestTerminated, setIsTestTerminated] = useState(false);
+  const [warningCount, setWarningCount] = useState(0);
   const wsRef = useRef(null);
   const intervalRef = useRef(null);
   const eventLogRef = useRef(null);
@@ -32,6 +33,10 @@ function App() {
       ws.onmessage = (event) => {
         const newEvent = JSON.parse(event.data);
         
+        if (newEvent.warning_count !== undefined) {
+          setWarningCount(newEvent.warning_count);
+        }
+
         if (newEvent.type === 'test_terminated') {
           setIsTestTerminated(true);
           if (intervalRef.current) clearInterval(intervalRef.current);
@@ -99,6 +104,7 @@ function App() {
       await fetch('http://localhost:8000/reset_proctoring', { method: 'POST' });
       setEvents([]);
       setIsTestTerminated(false);
+      setWarningCount(0); // Reset warning count on the frontend
       console.log('Proctoring state has been reset.');
     } catch (error) {
       console.error('Error resetting test:', error);
@@ -122,6 +128,9 @@ function App() {
       </header>
       
       <main className="main-content">
+        <div className="stats-bar">
+          <span>Warnings: {warningCount} / 3</span>
+        </div>
         <div className="webcam-container">
           <Webcam
             audio={false}
