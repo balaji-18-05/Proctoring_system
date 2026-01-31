@@ -6,17 +6,27 @@ import numpy as np
 import base64
 import json
 import logging
+import os
 from datetime import datetime
 import asyncio
 from typing import Dict, Any
+from dotenv import load_dotenv
 from .cv_processor import ProctoringSystem
 
+# Load environment variables from .env file
+load_dotenv()
+
 # Configure logging
+log_dir = 'logs'
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler()  # Only console logging
+        logging.StreamHandler(),
+        logging.FileHandler(os.path.join(log_dir, 'proctoring.log'))
     ]
 )
 
@@ -121,10 +131,10 @@ async def websocket_endpoint(websocket: WebSocket):
             
             
     except WebSocketDisconnect:
-        print("Client disconnected.")
+        logging.info("Client disconnected.")
         proctoring_system.reset_state() # Reset state on disconnect
     except Exception as e:
-        print(f"An error occurred in WebSocket: {e}")
+        logging.error(f"An error occurred in WebSocket: {e}", exc_info=True)
         proctoring_system.reset_state()
 
 

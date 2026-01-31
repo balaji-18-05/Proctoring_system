@@ -9,6 +9,7 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import urllib.request
 import os
+from twilio.rest import Client
 
 # --- MediaPipe Initialization ---
 model_path = 'face_landmarker_v2_with_blendshapes.task'
@@ -92,6 +93,38 @@ class HeadPoseEstimator:
         return pitch, yaw, roll
 
 class ProctoringSystem:
+    def _send_sms_notification(self, message: str):
+        """Sends an SMS notification using Twilio."""
+        self.logger.info("Attempting to send SMS notification.")
+        try:
+            account_sid = os.environ.get('TWILIO_ACCOUNT_SID')
+            auth_token = os.environ.get('TWILIO_AUTH_TOKEN')
+            twilio_phone_number = os.environ.get('TWILIO_PHONE_NUMBER')
+            recipient_phone_number = os.environ.get('RECIPIENT_PHONE_NUMBER')
+
+            self.logger.info(f"TWILIO_ACCOUNT_SID loaded: {'Yes' if account_sid else 'No'}")
+            self.logger.info(f"TWILIO_AUTH_TOKEN loaded: {'Yes' if auth_token else 'No'}")
+            self.logger.info(f"TWILIO_PHONE_NUMBER loaded: {'Yes' if twilio_phone_number else 'No'}")
+            self.logger.info(f"RECIPIENT_PHONE_NUMBER loaded: {'Yes' if recipient_phone_number else 'No'}")
+            account_sid = os.environ.get('TWILIO_ACCOUNT_SID')
+            auth_token = os.environ.get('TWILIO_AUTH_TOKEN')
+            twilio_phone_number = os.environ.get('TWILIO_PHONE_NUMBER')
+            recipient_phone_number = os.environ.get('RECIPIENT_PHONE_NUMBER')
+
+            if not all([account_sid, auth_token, twilio_phone_number, recipient_phone_number]):
+                self.logger.error("Twilio credentials are not fully configured in environment variables.")
+                return
+
+            client = Client(account_sid, auth_token)
+            client.messages.create(
+                body=message,
+                from_=twilio_phone_number,
+                to=recipient_phone_number
+            )
+            self.logger.info(f"SMS notification sent to {recipient_phone_number}.")
+        except Exception as e:
+            self.logger.error(f"Failed to send SMS: {e}")
+
     def __init__(self, ear_threshold: float = 0.23, gaze_away_duration: int = 5, drowsiness_duration: int = 300, head_yaw_threshold: int = 25, head_pitch_threshold: int = 20, max_warnings: int = 3, warning_cooldown: int = 15):
         self.ear_threshold = ear_threshold
         self.gaze_away_duration = timedelta(seconds=gaze_away_duration)
@@ -123,7 +156,9 @@ class ProctoringSystem:
         self.logger.info("Proctoring state has been reset.")
 
     def process_frame(self, frame: np.ndarray) -> List[Dict]:
+        self.logger.info(f"--- Processing frame. Warning count: {self.warning_count} ---")
         if self.test_terminated:
+            self.logger.info("Test is already terminated, skipping frame.")
             return []
 
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -133,6 +168,7 @@ class ProctoringSystem:
         events = []
 
         # --- Multiple Face Detection Logic ---
+        self.logger.info(f"Faces detected: {len(results.face_landmarks)}")
         if len(results.face_landmarks) > 1:
             multi_face_event = self._issue_warning("Multiple faces detected. Please ensure you are alone.")
             if multi_face_event:
@@ -149,6 +185,7 @@ class ProctoringSystem:
         # --- Head Pose Logic ---
         head_turned = yaw is not None and (abs(yaw) > self.head_yaw_threshold or pitch > self.head_pitch_threshold)
 
+        self.logger.info(f"Head turned: {head_turned} (Yaw: {yaw}, Pitch: {pitch})")
         if head_turned:
             if self.violation_start_time is None:
                 self.violation_start_time = datetime.now()
@@ -188,14 +225,16 @@ class ProctoringSystem:
         if self.last_warning_time and now - self.last_warning_time < self.warning_cooldown:
             return None
 
+        self.logger.info(f"Issuing warning. Reason: {reason}. New count: {self.warning_count + 1}")
         self.warning_count += 1
         self.last_warning_time = now
         self.violation_start_time = None
 
         if self.warning_count >= self.max_warnings:
             self.test_terminated = True
-            message = f"Test terminated after {self.max_warnings} warnings. Final violation: {reason}"
+            message = f"Test terminated after {self.max_warnings} warnings. Final violation: {reason} So try attending again."
             self.logger.error(message)
+            self._send_sms_notification(message) # Send SMS on test termination
             return self._create_event('test_terminated', message)
         else:
             message = f"Warning [{self.warning_count}/{self.max_warnings}]: {reason}"
