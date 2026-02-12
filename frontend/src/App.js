@@ -1,8 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Webcam from 'react-webcam';
+import TopicSelection from './components/TopicSelection';
+import Quiz from './components/Quiz';
+import QuizResults from './components/QuizResults';
+import { questions } from './questions';
 import './App.css';
 
 function App() {
+  const [currentView, setCurrentView] = useState('topic-selection');
+  const [selectedTopic, setSelectedTopic] = useState(null);
+  const [quizResults, setQuizResults] = useState(null);
+  
+  // Original proctoring states (for standalone proctoring mode)
   const webcamRef = useRef(null);
   const [isConnected, setIsConnected] = useState(false);
   const [events, setEvents] = useState([]);
@@ -71,16 +80,18 @@ function App() {
       };
     };
     
-    connectWebSocket();
+    if (currentView === 'proctoring') {
+      connectWebSocket();
+    }
     
     return () => {
       if (wsRef.current) wsRef.current.close();
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isTestTerminated]);
+  }, [currentView, isTestTerminated]);
 
   useEffect(() => {
-    if (isConnected && !isTestTerminated && webcamRef.current) {
+    if (isConnected && !isTestTerminated && webcamRef.current && currentView === 'proctoring') {
       intervalRef.current = setInterval(() => {
         const imageSrc = webcamRef.current.getScreenshot();
         if (imageSrc && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -97,18 +108,47 @@ function App() {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isConnected, isTestTerminated]);
+  }, [isConnected, isTestTerminated, currentView]);
 
   const resetTest = async () => {
     try {
       await fetch('http://localhost:8000/reset_proctoring', { method: 'POST' });
       setEvents([]);
       setIsTestTerminated(false);
-      setWarningCount(0); // Reset warning count on the frontend
+      setWarningCount(0);
       console.log('Proctoring state has been reset.');
     } catch (error) {
       console.error('Error resetting test:', error);
     }
+  };
+
+  const handleTopicSelect = (topicId) => {
+    setSelectedTopic(topicId);
+    setCurrentView('quiz');
+  };
+
+  const handleQuizComplete = (results) => {
+    setQuizResults(results);
+    setCurrentView('results');
+  };
+
+  const handleRetakeQuiz = () => {
+    setQuizResults(null);
+    setCurrentView('quiz');
+  };
+
+  const handleBackToTopics = () => {
+    setSelectedTopic(null);
+    setQuizResults(null);
+    setCurrentView('topic-selection');
+  };
+
+  const switchToProctoring = () => {
+    setCurrentView('proctoring');
+  };
+
+  const switchToQuiz = () => {
+    setCurrentView('topic-selection');
   };
 
   const renderEvent = (event, index) => {
@@ -121,49 +161,92 @@ function App() {
     );
   };
 
+  // Navigation component
+  const Navigation = () => (
+    <nav className="app-navigation">
+      <button 
+        onClick={switchToQuiz} 
+        className={`nav-btn ${currentView !== 'proctoring' ? 'active' : ''}`}
+      >
+        📝 Quiz Application
+      </button>
+      <button 
+        onClick={switchToProctoring} 
+        className={`nav-btn ${currentView === 'proctoring' ? 'active' : ''}`}
+      >
+        👁️ Standalone Proctoring
+      </button>
+    </nav>
+  );
+
   return (
     <div className="App">
       <header className="App-header">
-        <h1>AI Proctoring System</h1>
+        <h1>AI Proctoring & Quiz System</h1>
+        <Navigation />
       </header>
       
-      <main className="main-content">
-        <div className="stats-bar">
-          <span>Warnings: {warningCount} / 3</span>
-        </div>
-        <div className="webcam-container">
-          <Webcam
-            audio={false}
-            ref={webcamRef}
-            screenshotFormat="image/jpeg"
-            width={640}
-            height={480}
-            className="webcam-feed"
-            mirrored={true}
-          />
-          {isTestTerminated && (
-            <div className="test-terminated-overlay">
-              <h2>Test Terminated</h2>
-              <p>This session has been ended due to repeated violations.</p>
-              <button onClick={resetTest} className="reset-button">Start New Session</button>
-            </div>
-          )}
-        </div>
+      <main className={`main-content ${currentView === 'proctoring' ? 'proctoring-view' : 'quiz-view'}`}>
+        {currentView === 'topic-selection' && (
+          <TopicSelection onTopicSelect={handleTopicSelect} />
+        )}
         
-        <div className="control-panel">
-            <h2>Event Log</h2>
-            <div className="event-log-container" ref={eventLogRef}>
-                {events.map(renderEvent)}
+        {currentView === 'quiz' && selectedTopic && (
+          <Quiz 
+            questions={questions[selectedTopic]} 
+            onQuizComplete={handleQuizComplete}
+            onBackToTopics={handleBackToTopics}
+          />
+        )}
+        
+        {currentView === 'results' && quizResults && (
+          <QuizResults 
+            results={quizResults}
+            onRetakeQuiz={handleRetakeQuiz}
+            onBackToTopics={handleBackToTopics}
+          />
+        )}
+
+        {currentView === 'proctoring' && (
+          <>
+            <div className="stats-bar">
+              <span>Warnings: {warningCount} / 3</span>
             </div>
-            <div className="controls">
-                <button onClick={resetTest} className="reset-button" disabled={!isConnected && !isTestTerminated}>
-                    Reset Session
-                </button>
-                <div className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
-                    {isConnected ? '● Connected' : '○ Disconnected'}
+            <div className="webcam-container">
+              <Webcam
+                audio={false}
+                ref={webcamRef}
+                screenshotFormat="image/jpeg"
+                width={640}
+                height={480}
+                className="webcam-feed"
+                mirrored={true}
+              />
+              {isTestTerminated && (
+                <div className="test-terminated-overlay">
+                  <h2>Test Terminated</h2>
+                  <p>This session has been ended due to repeated violations.</p>
+                  <button onClick={resetTest} className="reset-button">Start New Session</button>
+                </div>
+              )}
+            </div>
+            
+            <div className="control-panel">
+                <h2>Event Log</h2>
+                <div className="event-log-container" ref={eventLogRef}>
+                    {events.map(renderEvent)}
+                </div>
+                <div className="controls">
+                    <button onClick={resetTest} className="reset-button" disabled={!isConnected && !isTestTerminated}>
+                        Reset Session
+                    </button>
+                    <div className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
+                        {isConnected ? '● Connected' : '○ Disconnected'}
+                    </div>
                 </div>
             </div>
-        </div>
+          </>
+        )}
       </main>
     </div>
   );
