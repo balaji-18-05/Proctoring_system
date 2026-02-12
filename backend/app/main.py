@@ -35,7 +35,7 @@ app = FastAPI(title="AI Proctoring System", version="1.0.0")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # React dev server
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"],  # React dev server
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,11 +43,11 @@ app.add_middleware(
 
 # Global proctoring system instance
 proctoring_system = ProctoringSystem(
-    ear_threshold=0.23,
-    gaze_away_duration=5,
-    drowsiness_duration=10,
-    head_yaw_threshold=25,
-    head_pitch_threshold=20
+    ear_threshold=0.25,
+    gaze_away_duration=3,
+    drowsiness_duration=5,
+    head_yaw_threshold=20,
+    head_pitch_threshold=15
 )
 
 # Connection manager for WebSocket
@@ -118,13 +118,24 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while not proctoring_system.test_terminated:
             data = await websocket.receive_bytes()
+            print(f"Received frame data: {len(data)} bytes")
+            
             frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+            
+            if frame is None:
+                print("Failed to decode frame")
+                continue
+                
+            print(f"Frame decoded successfully: {frame.shape}")
             
             # Process the frame and get events
             events = proctoring_system.process_frame(frame)
             
+            print(f"Generated {len(events)} events")
+            
             # Send each event to the client
             for event in events:
+                print(f"Sending event: {event}")
                 await websocket.send_json(event)
                 if event.get('type') == 'test_terminated':
                     break
